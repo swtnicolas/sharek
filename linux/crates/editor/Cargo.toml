@@ -1,0 +1,21 @@
+[package]
+name = "sharek-editor"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+sharek-common.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+libc.workspace = true
+png.workspace = true
+tiny-skia.workspace = true
+gif = "0.14"
+zbus = { workspace = true, features = ["blocking-api"] }
+slint = { version = "1.18", default-features = false, features = ["std", "compat-1-2", "backend-winit-wayland", "renderer-winit-software", "software-renderer-path", "software-renderer-systemfonts", "raw-window-handle-06", "unstable-winit-030"] }
+wayland-client = "0.31"
+wayland-backend = { version = "0.3", features = ["client_system"] }
+raw-window-handle = "0.6"
+
+[build-dependencies]
+slint-build = "1.18"

@@ -1,0 +1,53 @@
+name: macOS
+
+on:
+  push:
+    branches: ['**']
+    paths:
+      - 'macos/**'
+      - '.github/workflows/macos.yml'
+  workflow_dispatch:
+    inputs:
+      patch:
+        description: Patch in gzip and base64, applied before building
+        required: false
+        default: ''
+      profile:
+        description: Set to true to list what allocated the memory of both processes
+        required: false
+        default: 'false'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: macos-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - name: Apply patch
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.patch != '' }}
+        env:
+          PATCH: ${{ inputs.patch }}
+        run: printf '%s' "$PATCH" | base64 --decode | gunzip | git apply --whitespace=nowarn
+      - name: Build
+        run: macos/scripts/build.sh
+      - name: Test
+        if: ${{ !cancelled() }}
+        run: swift test --package-path macos
+      - name: Editor memory
+        if: ${{ !cancelled() }}
+        env:
+          CHECK_PROFILE: ${{ inputs.profile }}
+        run: python3 macos/scripts/memory-check.py macos/build/ShareK.app/Contents/MacOS/ShareK "$RUNNER_TEMP/sharek-check"
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: editor
+          path: ${{ runner.temp }}/sharek-check
+          if-no-files-found: ignore

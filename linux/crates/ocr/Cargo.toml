@@ -1,0 +1,9 @@
+[package]
+name = "sharek-ocr"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+sharek-common.workspace = true
+serde_json.workspace = true
+ort = { version = "=2.0.0-rc.15", default-features = false, features = ["std", "load-dynamic", "api-24"] }

@@ -1,0 +1,39 @@
+name: Release
+
+on:
+  push:
+    tags: ["linux-v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: linux
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install build dependencies
+        run: |
+          printf 'https://archive.ubuntu.com/ubuntu/\tpriority:1\nhttps://mirrors.edge.kernel.org/ubuntu/\tpriority:2\n' | sudo tee /etc/apt/apt-mirrors.txt
+          sudo apt-get -o Acquire::Retries=3 update
+          sudo apt-get -o Acquire::Retries=3 install -y pkg-config libfontconfig1-dev libxkbcommon-dev libwayland-dev
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+
+      - name: Package
+        run: sh scripts/package.sh
+
+      - name: Check glibc requirement
+        run: |
+          needed=$(for program in sharek sharek-editor sharek-gif sharek-ocr; do objdump -T "target/release/$program"; done | grep -v ' w ' | grep -o 'GLIBC_[0-9.]*' | sed 's/GLIBC_//' | sort -Vu | tail -1)
+          echo "Requires glibc $needed"
+          [ "$(printf '%s\n' "$needed" 2.35 | sort -V | tail -1)" = 2.35 ]
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/sharek-install.sh --title "ShareK para KDE Plasma ${GITHUB_REF_NAME#linux-v}" --generate-notes

@@ -1,0 +1,305 @@
+import { Button, ListView, Palette } from "std-widgets.slint";
+import { Theme } from "theme.slint";
+
+export struct HistoryCell {
+    index: int,
+    name: string,
+    date: string,
+    kind: string,
+    thumbnail: image,
+    selected: bool,
+}
+
+export struct HistoryRow {
+    cells: [HistoryCell],
+}
+
+export struct HistoryMenuItem {
+    name: string,
+    title: string,
+    separator: bool,
+}
+
+export component HistoryWindow inherits Window {
+    in property <string> window-title: "Historial";
+    in property <[HistoryRow]> rows;
+    in property <bool> empty;
+    in property <[HistoryMenuItem]> menu-items;
+    in property <length> menu-height;
+    in property <bool> confirming;
+    in property <string> confirm-title;
+    out property <int> columns: max(1, floor((self.width - 32px + 12px) / 188px));
+    out property <length> row-height: 164px;
+    property <length> menu-x;
+    property <length> menu-y;
+
+    callback columns-changed(int);
+    callback scrolled(length, length);
+    callback pressed(int, bool, bool, bool);
+    callback activated(int);
+    callback background-pressed();
+    callback key(string, bool, bool) -> bool;
+    callback menu-action(string);
+    callback confirmed(bool);
+
+    title: root.window-title;
+    preferred-width: 820px;
+    preferred-height: 560px;
+    min-width: 420px;
+    min-height: 300px;
+    background: Theme.canvas;
+
+    init => {
+        Palette.color-scheme = ColorScheme.dark;
+    }
+
+    changed columns => {
+        root.columns-changed(self.columns);
+    }
+
+    public function focus-list() {
+        focus.focus();
+    }
+
+    function open-menu(x: length, y: length) {
+        root.menu-x = min(x, root.width - 228px);
+        root.menu-y = min(y, root.height - root.menu-height - 8px);
+        menu.show();
+    }
+
+    focus := FocusScope {
+        key-pressed(event) => {
+            if root.key(event.text, event.modifiers.control, event.modifiers.shift) {
+                return accept;
+            }
+            reject
+        }
+
+        list := ListView {
+            width: parent.width;
+            height: parent.height;
+
+            changed content-y => {
+                root.scrolled(-self.content-y, self.visible-height);
+            }
+            changed visible-height => {
+                root.scrolled(-self.content-y, self.visible-height);
+            }
+
+            for row in root.rows: Rectangle {
+                height: root.row-height;
+
+                TouchArea {
+                    pointer-event(event) => {
+                        if event.kind == PointerEventKind.down {
+                            focus.focus();
+                            root.background-pressed();
+                        }
+                    }
+                }
+
+                HorizontalLayout {
+                    padding-left: 16px;
+                    padding-right: 16px;
+                    padding-top: 12px;
+                    spacing: 12px;
+                    alignment: start;
+
+                    for cell in row.cells: Rectangle {
+                        width: 176px;
+                        height: 152px;
+                        border-radius: 8px;
+                        background: cell.selected ? Theme.accent-soft : touch.has-hover ? #ffffff0d : transparent;
+
+                        touch := TouchArea {
+                            pointer-event(event) => {
+                                if event.kind == PointerEventKind.down {
+                                    focus.focus();
+                                    root.pressed(cell.index, event.modifiers.control, event.modifiers.shift, event.button == PointerEventButton.right);
+                                    if event.button == PointerEventButton.right {
+                                        root.open-menu(self.absolute-position.x - root.absolute-position.x + self.mouse-x, self.absolute-position.y - root.absolute-position.y + self.mouse-y);
+                                    }
+                                }
+                            }
+                            double-clicked => {
+                                root.activated(cell.index);
+                            }
+                        }
+
+                        Rectangle {
+                            x: 8px;
+                            y: 8px;
+                            width: 160px;
+                            height: 108px;
+                            border-radius: 4px;
+                            background: cell.thumbnail.width > 0 ? transparent : Theme.panel;
+
+                            Image {
+                                width: parent.width;
+                                height: parent.height;
+                                source: cell.thumbnail;
+                                image-fit: contain;
+                            }
+
+                            if cell.kind != "": Rectangle {
+                                x: parent.width - self.width - 4px;
+                                y: parent.height - self.height - 4px;
+                                width: 26px;
+                                height: 18px;
+                                border-radius: 4px;
+                                background: #0000008c;
+
+                                if cell.kind == "video": Path {
+                                    width: 10px;
+                                    height: 10px;
+                                    viewbox-width: 10;
+                                    viewbox-height: 10;
+                                    commands: "M 2 1 L 9 5 L 2 9 Z";
+                                    fill: white;
+                                }
+                                if cell.kind == "gif": Text {
+                                    text: "GIF";
+                                    font-size: 9px;
+                                    font-weight: 700;
+                                    color: white;
+                                }
+                            }
+                        }
+
+                        Text {
+                            x: 6px;
+                            y: 120px;
+                            width: parent.width - 12px;
+                            text: cell.name;
+                            font-size: 11px;
+                            color: Theme.text;
+                            horizontal-alignment: center;
+                            overflow: elide;
+                        }
+
+                        Text {
+                            x: 6px;
+                            y: 136px;
+                            width: parent.width - 12px;
+                            text: cell.date;
+                            font-size: 10px;
+                            color: Theme.tertiary;
+                            horizontal-alignment: center;
+                            overflow: elide;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if root.empty: Text {
+        text: "Aún no hay capturas guardadas";
+        font-size: 13px;
+        color: Theme.tertiary;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+
+    menu := PopupWindow {
+        x: root.menu-x;
+        y: root.menu-y;
+        width: 220px;
+        height: root.menu-height;
+
+        Rectangle {
+            background: #292c30;
+            border-radius: 6px;
+            border-width: 1px;
+            border-color: Theme.border;
+
+            VerticalLayout {
+                padding: 5px;
+
+                for item in root.menu-items: Rectangle {
+                    height: item.separator ? 9px : 26px;
+                    border-radius: 4px;
+                    background: !item.separator && entry.has-hover ? Theme.accent-soft : transparent;
+
+                    if item.separator: Rectangle {
+                        y: 4px;
+                        height: 1px;
+                        background: Theme.border;
+                    }
+
+                    entry := TouchArea {
+                        enabled: !item.separator;
+                        clicked => {
+                            menu.close();
+                            root.menu-action(item.name);
+                        }
+                    }
+
+                    if !item.separator: Text {
+                        x: 10px;
+                        width: parent.width - 20px;
+                        text: item.title;
+                        font-size: 12px;
+                        color: Theme.text;
+                        vertical-alignment: center;
+                        overflow: elide;
+                    }
+                }
+            }
+        }
+    }
+
+    if root.confirming: Rectangle {
+        background: #00000080;
+
+        TouchArea { }
+
+        Rectangle {
+            width: 380px;
+            height: 132px;
+            border-radius: 10px;
+            border-width: 1px;
+            border-color: Theme.border;
+            background: Theme.panel;
+
+            VerticalLayout {
+                padding: 18px;
+                spacing: 8px;
+
+                Text {
+                    text: root.confirm-title;
+                    font-size: 14px;
+                    font-weight: 700;
+                    color: Theme.text;
+                    wrap: word-wrap;
+                }
+
+                Text {
+                    text: "Puedes recuperarlos desde la papelera.";
+                    font-size: 12px;
+                    color: Theme.secondary;
+                }
+
+                HorizontalLayout {
+                    alignment: end;
+                    spacing: 8px;
+
+                    Button {
+                        text: "Cancelar";
+                        clicked => {
+                            root.confirmed(false);
+                        }
+                    }
+
+                    Button {
+                        text: "Mover a la papelera";
+                        primary: true;
+                        clicked => {
+                            root.confirmed(true);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

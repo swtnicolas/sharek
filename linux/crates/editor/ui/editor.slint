@@ -1,0 +1,1336 @@
+import { Button, ComboBox, CheckBox, Palette, ScrollView } from "std-widgets.slint";
+import { Theme } from "theme.slint";
+export { HistoryWindow } from "history.slint";
+
+export struct TabItem {
+    title: string,
+    edited: bool,
+}
+
+export struct ToolItem {
+    name: string,
+    title: string,
+    help: string,
+    icon: string,
+    key: string,
+    stroke: color,
+    fill: color,
+}
+
+export struct ToolGroup {
+    tools: [ToolItem],
+    current: int,
+    rank: int,
+}
+
+export struct OptionItem {
+    kind: string,
+    key: string,
+    label: string,
+    color: color,
+    choices: [string],
+    selected: int,
+    checked: bool,
+}
+
+export struct Swatch {
+    color: color,
+    label: string,
+}
+
+component IconButton inherits Rectangle {
+    in property <string> icon;
+    in property <color> stroke: Theme.icon;
+    in property <color> fill: transparent;
+    in property <bool> selected;
+    callback activated(bool);
+    callback hovered(bool);
+    width: 34px;
+    height: 34px;
+    border-radius: 8px;
+    background: root.selected ? #ffffff1f : touch.pressed ? #ffffff26 : touch.has-hover ? #ffffff12 : transparent;
+    Path {
+        width: 22px;
+        height: 22px;
+        viewbox-width: 24;
+        viewbox-height: 24;
+        commands: root.icon;
+        stroke: root.stroke;
+        fill: root.fill;
+        stroke-width: 1.9px;
+    }
+    touch := TouchArea {
+        pointer-event(event) => {
+            if event.kind == PointerEventKind.up && event.button == PointerEventButton.left && self.has-hover {
+                root.activated(event.modifiers.shift);
+            }
+        }
+        changed has-hover => { root.hovered(self.has-hover); }
+    }
+}
+
+component CopyButton inherits Rectangle {
+    in property <string> icon;
+    in property <bool> compact;
+    callback activated();
+    callback dragged();
+    callback hovered(bool);
+    property <bool> dragging;
+    width: root.compact ? 36px : 98px;
+    height: 32px;
+    border-radius: 8px;
+    background: touch.pressed ? Theme.accent-pressed : touch.has-hover ? Theme.accent-hover : Theme.accent;
+    HorizontalLayout {
+        padding-left: root.compact ? 9px : 11px;
+        spacing: 7px;
+        alignment: start;
+        Path {
+            width: 18px;
+            height: 18px;
+            y: (parent.height - self.height) / 2;
+            viewbox-width: 24;
+            viewbox-height: 24;
+            commands: root.icon;
+            stroke: #ffffff;
+            stroke-width: 2px;
+            fill: transparent;
+        }
+        if !root.compact: Text {
+            text: "Copiar";
+            font-size: 13px;
+            font-weight: 700;
+            color: #ffffff;
+            vertical-alignment: center;
+        }
+    }
+    touch := TouchArea {
+        moved => {
+            if self.pressed && !root.dragging && (abs(self.mouse-x - self.pressed-x) > 8px || abs(self.mouse-y - self.pressed-y) > 8px) {
+                root.dragging = true;
+                root.dragged();
+            }
+        }
+        pointer-event(event) => {
+            if event.kind == PointerEventKind.up {
+                if !root.dragging && self.has-hover && event.button == PointerEventButton.left {
+                    root.activated();
+                }
+                root.dragging = false;
+            }
+        }
+        changed has-hover => { root.hovered(self.has-hover); }
+    }
+}
+
+component GroupButton inherits Rectangle {
+    in property <ToolGroup> group;
+    in property <string> tool;
+    callback select(string);
+    callback hovered(ToolItem, bool, length);
+    property <ToolItem> shown: root.group.tools[root.group.current];
+    property <ToolItem> described: root.shown;
+    width: 48px;
+    height: 34px;
+    border-radius: 8px;
+    background: root.shown.name == root.tool ? #ffffff1f : main.has-hover || more.has-hover ? #ffffff12 : transparent;
+    Path {
+        x: 6px;
+        width: 22px;
+        height: 22px;
+        viewbox-width: 24;
+        viewbox-height: 24;
+        commands: root.shown.icon;
+        stroke: root.shown.stroke;
+        fill: root.shown.fill;
+        stroke-width: 1.9px;
+    }
+    Path {
+        x: 32px;
+        width: 10px;
+        height: 10px;
+        viewbox-width: 10;
+        viewbox-height: 10;
+        commands: "M 1.5 3.5 L 5 7 L 8.5 3.5";
+        stroke: more.has-hover ? Theme.text : Theme.tertiary;
+        stroke-width: 1.6px;
+        fill: transparent;
+    }
+    main := TouchArea {
+        x: 0;
+        width: 30px;
+        clicked => { root.select(root.shown.name); }
+        changed has-hover => { root.hovered(root.shown, self.has-hover, root.absolute-position.x); }
+    }
+    more := TouchArea {
+        x: 30px;
+        width: parent.width - 30px;
+        clicked => {
+            root.described = root.shown;
+            popup.show();
+        }
+    }
+    popup := PopupWindow {
+        x: 0;
+        y: root.height + 6px;
+        width: max(root.group.tools.length * 36px + 10px, 270px);
+        height: 46px + caption.preferred-height;
+        Rectangle {
+            background: Theme.tooltip;
+            border-radius: 10px;
+            border-width: 1px;
+            border-color: Theme.border;
+            drop-shadow-blur: 10px;
+            drop-shadow-color: #00000080;
+            HorizontalLayout {
+                x: 5px;
+                y: 5px;
+                height: 38px;
+                spacing: 2px;
+                alignment: start;
+                for item in root.group.tools: IconButton {
+                    icon: item.icon;
+                    stroke: item.stroke;
+                    fill: item.fill;
+                    selected: item.name == root.tool;
+                    activated => {
+                        root.select(item.name);
+                        popup.close();
+                    }
+                    hovered(inside) => {
+                        if inside {
+                            root.described = item;
+                        }
+                    }
+                }
+            }
+            Rectangle {
+                x: 10px;
+                y: 46px;
+                width: parent.width - 20px;
+                height: 1px;
+                background: Theme.border;
+            }
+            caption := VerticalLayout {
+                x: 0;
+                y: 46px;
+                width: parent.width;
+                height: self.preferred-height;
+                padding-left: 10px;
+                padding-right: 10px;
+                padding-top: 8px;
+                padding-bottom: 9px;
+                spacing: 3px;
+                Text {
+                    text: root.described.title + "  ·  " + root.described.key;
+                    font-size: 12px;
+                    font-weight: 700;
+                    color: Theme.text;
+                }
+                Text {
+                    text: root.described.help;
+                    font-size: 11px;
+                    color: Theme.secondary;
+                    wrap: word-wrap;
+                }
+            }
+        }
+    }
+}
+
+component Separator inherits Rectangle {
+    width: 1px;
+    height: 20px;
+    background: Theme.border;
+}
+
+component Label inherits Text {
+    font-size: 12px;
+    color: Theme.secondary;
+    vertical-alignment: center;
+}
+
+component SwatchCell inherits Rectangle {
+    in property <color> value;
+    in property <bool> current;
+    callback picked();
+    width: 24px;
+    height: 24px;
+    border-radius: 5px;
+    border-width: touch.has-hover || root.current ? 2px : 1px;
+    border-color: touch.has-hover || root.current ? Theme.text : #ffffff30;
+    background: root.value.alpha == 0 ? #ffffff : root.value;
+    if root.value.alpha == 0: Path {
+        width: 100%;
+        height: 100%;
+        viewbox-width: 24;
+        viewbox-height: 24;
+        commands: "M 4 20 L 20 4";
+        stroke: #f23c3c;
+        stroke-width: 2px;
+    }
+    touch := TouchArea {
+        clicked => { root.picked(); }
+    }
+}
+
+component ColorButton inherits Rectangle {
+    in property <color> value;
+    in property <string> caption;
+    in property <[Swatch]> swatches;
+    in property <string> eyedropper;
+    callback picked(color);
+    callback pick-from-image();
+    width: 26px;
+    height: 26px;
+    border-radius: 13px;
+    background: touch.has-hover ? #ffffff1a : transparent;
+    Rectangle {
+        width: 20px;
+        height: 20px;
+        border-radius: 10px;
+        border-width: 1px;
+        border-color: #ffffff40;
+        background: root.value.alpha == 0 ? #ffffff : root.value;
+        clip: true;
+        if root.value.alpha == 0: Path {
+            width: 100%;
+            height: 100%;
+            viewbox-width: 20;
+            viewbox-height: 20;
+            commands: "M 3 17 L 17 3";
+            stroke: #f23c3c;
+            stroke-width: 2px;
+        }
+    }
+    touch := TouchArea {
+        clicked => { popup.show(); }
+    }
+    popup := PopupWindow {
+        x: -10px;
+        y: -self.height - 10px;
+        width: 8 * 28px + 14px;
+        height: 24px + 2 * 28px + 14px + 34px;
+        Rectangle {
+            background: Theme.tooltip;
+            border-radius: 10px;
+            border-width: 1px;
+            border-color: Theme.border;
+            drop-shadow-blur: 10px;
+            drop-shadow-color: #00000080;
+            Text {
+                x: 9px;
+                y: 6px;
+                height: 18px;
+                text: root.caption;
+                font-size: 12px;
+                font-weight: 700;
+                color: Theme.text;
+                vertical-alignment: center;
+            }
+            for swatch[index] in root.swatches: SwatchCell {
+                x: 7px + mod(index, 8) * 28px;
+                y: 24px + 7px + floor(index / 8) * 28px;
+                value: swatch.color;
+                picked => {
+                    root.picked(swatch.color);
+                    popup.close();
+                }
+            }
+            Rectangle {
+                x: 7px;
+                y: 24px + 2 * 28px + 9px;
+                width: parent.width - 14px;
+                height: 28px;
+                border-radius: 6px;
+                background: drop-touch.has-hover ? #ffffff1a : #ffffff0d;
+                HorizontalLayout {
+                    padding-left: 8px;
+                    spacing: 8px;
+                    Path {
+                        width: 16px;
+                        height: 16px;
+                        y: (parent.height - self.height) / 2;
+                        viewbox-width: 24;
+                        viewbox-height: 24;
+                        commands: root.eyedropper;
+                        stroke: Theme.text;
+                        stroke-width: 1.8px;
+                        fill: transparent;
+                    }
+                    Text {
+                        text: "Tomar color de la imagen";
+                        font-size: 12px;
+                        color: Theme.text;
+                        vertical-alignment: center;
+                    }
+                }
+                drop-touch := TouchArea {
+                    clicked => {
+                        root.pick-from-image();
+                        popup.close();
+                    }
+                }
+            }
+        }
+    }
+}
+
+component OptionsRow inherits HorizontalLayout {
+    in property <string> title;
+    in property <[OptionItem]> options;
+    in property <bool> compact;
+    in property <[Swatch]> swatches;
+    in property <string> eyedropper;
+    callback color-picked(string, color);
+    callback pick-from-image(string);
+    callback choice(string, int);
+    callback check(string, bool);
+    callback button(string);
+    spacing: 14px;
+    alignment: center;
+    if !root.compact: Text {
+        text: root.title;
+        font-weight: 700;
+        color: Theme.text;
+        vertical-alignment: center;
+    }
+    for option in root.options: HorizontalLayout {
+        spacing: 6px;
+        if option.kind == "hint": Label {
+            text: option.label;
+        }
+        if option.kind == "button": Button {
+            text: option.label;
+            height: 30px;
+            y: 7px;
+            clicked => { root.button(option.key); }
+        }
+        if option.kind == "color": ColorButton {
+            y: 9px;
+            value: option.color;
+            caption: option.label;
+            swatches: root.swatches;
+            eyedropper: root.eyedropper;
+            picked(value) => { root.color-picked(option.key, value); }
+            pick-from-image => { root.pick-from-image(option.key); }
+        }
+        if (option.kind == "color" && !root.compact) || option.kind == "choice": Label {
+            text: option.label;
+        }
+        if option.kind == "choice": ComboBox {
+            y: 7px;
+            height: 30px;
+            min-width: 84px;
+            model: option.choices;
+            current-index: option.selected;
+            selected => { root.choice(option.key, self.current-index); }
+        }
+        if option.kind == "shadow": CheckBox {
+            text: option.label;
+            checked: option.checked;
+            toggled => { root.check(option.key, self.checked); }
+        }
+    }
+}
+
+component Chip inherits Rectangle {
+    in property <string> label;
+    in property <bool> current;
+    callback picked();
+    width: max(34px, chip-text.preferred-width + 14px);
+    height: 26px;
+    border-radius: 6px;
+    background: root.current ? Theme.accent-soft : touch.has-hover ? #ffffff14 : #ffffff0a;
+    border-width: root.current ? 1px : 0px;
+    border-color: Theme.accent;
+    chip-text := Text {
+        text: root.label;
+        font-size: 12px;
+        color: root.current ? Theme.text : Theme.secondary;
+    }
+    touch := TouchArea {
+        clicked => { root.picked(); }
+    }
+}
+
+component FrameRow inherits HorizontalLayout {
+    in property <string> title;
+    spacing: 8px;
+    alignment: start;
+    Text {
+        text: root.title;
+        width: 64px;
+        font-size: 12px;
+        color: Theme.secondary;
+        vertical-alignment: center;
+    }
+    @children
+}
+
+component Tooltip inherits Rectangle {
+    in property <string> title;
+    in property <string> body;
+    width: min(280px, max(title-measure.preferred-width, root.body == "" ? 0px : body-measure.preferred-width) + 20px);
+    height: content.preferred-height;
+    background: Theme.tooltip;
+    border-radius: 7px;
+    border-width: 1px;
+    border-color: Theme.border;
+    drop-shadow-blur: 10px;
+    drop-shadow-color: #00000080;
+    title-measure := Text {
+        visible: false;
+        text: root.title;
+        font-size: 12px;
+        font-weight: 700;
+    }
+    body-measure := Text {
+        visible: false;
+        text: root.body;
+        font-size: 11px;
+    }
+    content := VerticalLayout {
+        padding-left: 10px;
+        padding-right: 10px;
+        padding-top: 8px;
+        padding-bottom: 9px;
+        spacing: 3px;
+        Text {
+            text: root.title;
+            font-size: 12px;
+            font-weight: 700;
+            color: Theme.text;
+            overflow: elide;
+        }
+        if root.body != "": Text {
+            text: root.body;
+            font-size: 11px;
+            color: Theme.secondary;
+            wrap: word-wrap;
+        }
+    }
+}
+
+export component EditorWindow inherits Window {
+    title: root.window-title;
+    preferred-width: 1280px;
+    preferred-height: 760px;
+    min-width: 720px;
+    min-height: 480px;
+    background: Theme.window;
+    default-font-size: 12px;
+
+    in property <string> window-title: "ShareK";
+    in-out property <bool> repaint;
+    in property <[TabItem]> tabs;
+    in property <int> current-tab;
+    in property <[ToolGroup]> groups;
+    in property <[length]> thresholds;
+    in property <string> tool;
+    in property <[OptionItem]> options;
+    in property <string> options-title;
+    in property <[Swatch]> swatches;
+    in property <[Swatch]> frame-swatches;
+    in property <image> canvas;
+    in property <bool> media;
+    in property <image> media-image;
+    in property <string> media-info;
+    in property <bool> media-video;
+    in property <bool> editing;
+    in property <length> edit-x;
+    in property <length> edit-y;
+    in property <length> edit-width;
+    in property <length> edit-height;
+    in property <length> edit-padding-x;
+    in property <length> edit-padding-y;
+    in property <length> edit-font-size;
+    in property <bool> has-selection;
+    in property <bool> picking;
+    in property <bool> selecting-text;
+    in property <string> zoom-label;
+    in property <[ToolItem]> actions;
+    in property <[ToolItem]> image-tools;
+    in property <string> undo-icon;
+    in property <string> redo-icon;
+    in property <color> history-color;
+    in property <string> eyedropper-icon;
+    in property <string> fit-icon;
+    in property <float> frame-margin;
+    in property <float> frame-radius;
+    in property <float> frame-border;
+    in property <bool> frame-shadow;
+    in property <color> frame-background;
+    in property <color> frame-border-color;
+    in property <[float]> frame-margins;
+    in property <[float]> frame-radii;
+    in property <[float]> frame-borders;
+    out property <length> canvas-width: canvas-area.width;
+    out property <length> canvas-height: canvas-area.height;
+    property <string> hint-title;
+    property <string> hint-body;
+    property <length> hint-x;
+    property <length> top-height: (root.tabs.length > 1 ? 36px : 0px) + 52px;
+    property <int> level: root.thresholds.length < 5 ? 0 : root.width >= root.thresholds[0] ? 0 : root.width >= root.thresholds[1] ? 1 : root.width >= root.thresholds[2] ? 2 : root.width >= root.thresholds[3] ? 3 : root.width >= root.thresholds[4] ? 4 : 5;
+
+    callback select-tool(string);
+    callback select-tab(int);
+    callback close-tab(int);
+    callback pointer(string, string, length, length, bool, bool);
+    callback scrolled(length, length, length, length, bool);
+    callback key(string, bool, bool, bool) -> bool;
+    callback option-color(string, color);
+    callback option-choice(string, int);
+    callback option-check(string, bool);
+    callback option-button(string);
+    callback pick-color(string);
+    callback action(string, bool);
+    callback drag-out();
+    callback zoom(string);
+    callback frame-set(string, float);
+    callback frame-color(string, color);
+    callback frame-apply();
+    callback text-changed(string);
+    callback text-finished();
+    callback text-history(bool) -> bool;
+    callback caret(int, int);
+    callback context-action(string);
+    callback canvas-resized();
+
+    init => {
+        Palette.color-scheme = ColorScheme.dark;
+    }
+
+    public function focus-canvas() {
+        keys.focus();
+    }
+
+    public function restore-focus() {
+        if root.editing {
+            editor.focus();
+        } else {
+            keys.focus();
+        }
+    }
+
+    public function begin-text(text: string) {
+        editor.text = text;
+        editor.focus();
+        editor.select-all();
+    }
+
+    function show-hint(title: string, body: string, x: length) {
+        root.hint-title = title;
+        root.hint-body = body;
+        root.hint-x = x;
+    }
+
+    Rectangle {
+        background: root.repaint ? #00000001 : #00000000;
+    }
+
+    keys := FocusScope {
+        key-pressed(event) => {
+            if root.key(event.text, event.modifiers.control, event.modifiers.shift, event.modifiers.alt) {
+                return accept;
+            }
+            reject
+        }
+
+        VerticalLayout {
+            if root.tabs.length > 1: Rectangle {
+                property <length> tab-width: min(230px, (self.width - 16px) / max(1, root.tabs.length));
+                height: 36px;
+                background: Theme.window;
+                for tab[index] in root.tabs: Rectangle {
+                    property <bool> active: index == root.current-tab;
+                    x: 8px + index * parent.tab-width;
+                    y: 6px;
+                    width: parent.tab-width;
+                    height: parent.height - 6px;
+                    tab-touch := TouchArea {
+                        clicked => { root.select-tab(index); }
+                    }
+                    Rectangle {
+                        x: 1px;
+                        y: 0;
+                        width: parent.width - 2px;
+                        height: parent.height + 1px;
+                        border-top-left-radius: 8px;
+                        border-top-right-radius: 8px;
+                        background: active ? Theme.panel : tab-touch.has-hover ? #ffffff14 : #ffffff08;
+                    }
+                    if active: Rectangle {
+                        x: 10px;
+                        y: 0;
+                        width: parent.width - 20px;
+                        height: 2px;
+                        border-radius: 1px;
+                        background: Theme.accent;
+                    }
+                    HorizontalLayout {
+                        padding-left: 12px;
+                        padding-right: 6px;
+                        spacing: 6px;
+                        if tab.edited: Rectangle {
+                            width: 7px;
+                            height: 7px;
+                            y: (parent.height - self.height) / 2;
+                            border-radius: 3.5px;
+                            background: active ? Theme.accent : Theme.tertiary;
+                        }
+                        Text {
+                            text: tab.title;
+                            vertical-alignment: center;
+                            overflow: elide;
+                            horizontal-stretch: 1;
+                            font-weight: active ? 700 : 400;
+                            color: active ? Theme.text : tab-touch.has-hover ? Theme.secondary : Theme.tertiary;
+                        }
+                        Rectangle {
+                            width: 22px;
+                            height: 22px;
+                            y: (parent.height - self.height) / 2;
+                            border-radius: 11px;
+                            background: close-touch.has-hover ? #ffffff1a : transparent;
+                            visible: active || tab-touch.has-hover || close-touch.has-hover;
+                            Path {
+                                width: 10px;
+                                height: 10px;
+                                viewbox-width: 10;
+                                viewbox-height: 10;
+                                commands: "M 1 1 L 9 9 M 9 1 L 1 9";
+                                stroke: close-touch.has-hover ? Theme.text : Theme.secondary;
+                                stroke-width: 1.4px;
+                            }
+                            close-touch := TouchArea {
+                                clicked => { root.close-tab(index); }
+                            }
+                        }
+                    }
+                }
+            }
+
+            Rectangle {
+                height: 52px;
+                background: Theme.panel;
+                clip: true;
+                HorizontalLayout {
+                    x: 0;
+                    y: 0;
+                    width: parent.width;
+                    height: parent.height;
+                    padding-left: 10px;
+                    padding-right: 10px;
+                    padding-top: 9px;
+                    padding-bottom: 9px;
+                    spacing: 0px;
+                    for item in root.actions: HorizontalLayout {
+                        if item.name == "copy": CopyButton {
+                            y: 1px;
+                            icon: item.icon;
+                            compact: root.level >= 4;
+                            activated => { root.action("copy", false); }
+                            dragged => { root.drag-out(); }
+                            hovered(inside) => {
+                                if inside {
+                                    root.show-hint(item.title, item.help, self.absolute-position.x);
+                                } else {
+                                    root.hint-title = "";
+                                }
+                            }
+                        }
+                        if item.name == "copy": Rectangle {
+                            width: 6px;
+                        }
+                        if item.name != "copy" && item.name != "discard": IconButton {
+                            icon: item.icon;
+                            stroke: item.stroke;
+                            activated(shift) => { root.action(item.name, shift); }
+                            hovered(inside) => {
+                                if inside {
+                                    root.show-hint(item.title, item.help, self.absolute-position.x);
+                                } else {
+                                    root.hint-title = "";
+                                }
+                            }
+                        }
+                    }
+                    if !root.media: Rectangle {
+                        width: 13px;
+                        Separator {
+                            x: 6px;
+                        }
+                    }
+                    if !root.media: IconButton {
+                        icon: root.undo-icon;
+                        stroke: root.history-color;
+                        activated => { root.action("undo", false); }
+                        hovered(inside) => {
+                            if inside {
+                                root.show-hint("Deshacer · Ctrl+Z", "", self.absolute-position.x);
+                            } else {
+                                root.hint-title = "";
+                            }
+                        }
+                    }
+                    if !root.media: IconButton {
+                        icon: root.redo-icon;
+                        stroke: root.history-color;
+                        activated => { root.action("redo", false); }
+                        hovered(inside) => {
+                            if inside {
+                                root.show-hint("Rehacer · Ctrl+Mayús+Z", "", self.absolute-position.x);
+                            } else {
+                                root.hint-title = "";
+                            }
+                        }
+                    }
+                    if !root.media: Rectangle {
+                        width: 13px;
+                        Separator {
+                            x: 6px;
+                        }
+                    }
+                    if !root.media: HorizontalLayout {
+                        spacing: 10px;
+                        for group in root.groups: HorizontalLayout {
+                            if group.rank > root.level: HorizontalLayout {
+                                for item in group.tools: IconButton {
+                                    icon: item.icon;
+                                    stroke: item.stroke;
+                                    fill: item.fill;
+                                    selected: item.name == root.tool;
+                                    activated => { root.select-tool(item.name); }
+                                    hovered(inside) => {
+                                        if inside {
+                                            root.show-hint(item.title + "  ·  " + item.key, item.help, self.absolute-position.x);
+                                        } else {
+                                            root.hint-title = "";
+                                        }
+                                    }
+                                }
+                            }
+                            if group.rank <= root.level: GroupButton {
+                                group: group;
+                                tool: root.tool;
+                                select(name) => { root.select-tool(name); }
+                                hovered(item, inside, x) => {
+                                    if inside {
+                                        root.show-hint(item.title + "  ·  " + item.key, item.help, x);
+                                    } else {
+                                        root.hint-title = "";
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if !root.media: Rectangle {
+                        width: 13px;
+                        Separator {
+                            x: 6px;
+                        }
+                    }
+                    if !root.media: HorizontalLayout {
+                        for item in root.image-tools: holder := Rectangle {
+                            width: 34px;
+                            height: 34px;
+                            IconButton {
+                                icon: item.icon;
+                                stroke: item.stroke;
+                                activated(shift) => {
+                                    if item.name == "frame" {
+                                        frame-popup.show();
+                                    } else {
+                                        root.action(item.name, shift);
+                                    }
+                                }
+                                hovered(inside) => {
+                                    if inside {
+                                        root.show-hint(item.title, item.help, self.absolute-position.x);
+                                    } else {
+                                        root.hint-title = "";
+                                    }
+                                }
+                            }
+                            frame-popup := PopupWindow {
+                                x: min(0px, root.width - holder.absolute-position.x - self.width - 10px);
+                                y: 42px;
+                                width: 384px;
+                                height: frame-content.preferred-height;
+                                close-policy: PopupClosePolicy.close-on-click-outside;
+                                Rectangle {
+                                    background: Theme.tooltip;
+                                    border-radius: 10px;
+                                    border-width: 1px;
+                                    border-color: Theme.border;
+                                    drop-shadow-blur: 12px;
+                                    drop-shadow-color: #00000080;
+                                    frame-content := VerticalLayout {
+                                        padding: 14px;
+                                        spacing: 10px;
+                                        alignment: start;
+                                        Text {
+                                            text: "Marco de la imagen";
+                                            font-size: 13px;
+                                            font-weight: 700;
+                                            color: Theme.text;
+                                        }
+                                        FrameRow {
+                                            title: "Margen";
+                                            for value in root.frame-margins: Chip {
+                                                label: value;
+                                                current: value == root.frame-margin;
+                                                picked => { root.frame-set("margin", value); }
+                                            }
+                                        }
+                                        FrameRow {
+                                            title: "Fondo";
+                                            for swatch in root.frame-swatches: SwatchCell {
+                                                value: swatch.color;
+                                                current: swatch.color == root.frame-background;
+                                                picked => { root.frame-color("background", swatch.color); }
+                                            }
+                                        }
+                                        FrameRow {
+                                            title: "Esquinas";
+                                            for value in root.frame-radii: Chip {
+                                                label: value;
+                                                current: value == root.frame-radius;
+                                                picked => { root.frame-set("radius", value); }
+                                            }
+                                        }
+                                        FrameRow {
+                                            title: "Borde";
+                                            for value in root.frame-borders: Chip {
+                                                label: value;
+                                                current: value == root.frame-border;
+                                                picked => { root.frame-set("border", value); }
+                                            }
+                                        }
+                                        if root.frame-border > 0: FrameRow {
+                                            title: "Color";
+                                            for swatch in root.frame-swatches: SwatchCell {
+                                                value: swatch.color;
+                                                current: swatch.color == root.frame-border-color;
+                                                picked => { root.frame-color("border", swatch.color); }
+                                            }
+                                        }
+                                        FrameRow {
+                                            title: "Sombra";
+                                            Chip {
+                                                label: "Sí";
+                                                current: root.frame-shadow;
+                                                picked => { root.frame-set("shadow", 1); }
+                                            }
+                                            Chip {
+                                                label: "No";
+                                                current: !root.frame-shadow;
+                                                picked => { root.frame-set("shadow", 0); }
+                                            }
+                                        }
+                                        HorizontalLayout {
+                                            alignment: end;
+                                            Rectangle {
+                                                width: apply-text.preferred-width + 28px;
+                                                height: 30px;
+                                                border-radius: 8px;
+                                                background: apply-touch.pressed ? Theme.accent-pressed : apply-touch.has-hover ? Theme.accent-hover : Theme.accent;
+                                                apply-text := Text {
+                                                    text: "Aplicar marco";
+                                                    font-size: 12px;
+                                                    font-weight: 700;
+                                                    color: #ffffff;
+                                                }
+                                                apply-touch := TouchArea {
+                                                    clicked => {
+                                                        root.frame-apply();
+                                                        frame-popup.close();
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    Rectangle {
+                        horizontal-stretch: 1;
+                    }
+                    for item in root.actions: HorizontalLayout {
+                        if item.name == "discard": Rectangle {
+                            width: 13px;
+                            Separator {
+                                x: 6px;
+                            }
+                        }
+                        if item.name == "discard": IconButton {
+                            icon: item.icon;
+                            stroke: item.stroke;
+                            activated => { root.action("discard", false); }
+                            hovered(inside) => {
+                                if inside {
+                                    root.show-hint(item.title, item.help, self.absolute-position.x);
+                                } else {
+                                    root.hint-title = "";
+                                }
+                            }
+                        }
+                    }
+                }
+                Rectangle {
+                    y: parent.height - 1px;
+                    height: 1px;
+                    background: Theme.border;
+                }
+            }
+
+            canvas-area := Rectangle {
+                background: Theme.canvas;
+                clip: true;
+                changed width => { root.canvas-resized(); }
+                changed height => { root.canvas-resized(); }
+
+                if root.media: Image {
+                    source: root.media-image;
+                    width: min(parent.width - 48px, self.source.width * 1px);
+                    height: min(parent.height - 48px, self.source.height * 1px);
+                    image-fit: contain;
+                }
+
+                if root.media: Text {
+                    x: 14px;
+                    y: parent.height - self.height - 12px;
+                    text: root.media-info;
+                    font-size: 12px;
+                    color: Theme.secondary;
+                }
+
+                if !root.media: Image {
+                    x: 0;
+                    y: 0;
+                    width: parent.width;
+                    height: parent.height;
+                    source: root.canvas;
+                    image-fit: fill;
+                    image-rendering: pixelated;
+                }
+
+                if !root.media: menu-area := ContextMenuArea {
+                    enabled: root.has-selection;
+                    Menu {
+                        MenuItem {
+                            title: "Duplicar";
+                            activated => { root.context-action("duplicate"); }
+                        }
+                        MenuItem {
+                            title: "Traer al frente";
+                            activated => { root.context-action("front"); }
+                        }
+                        MenuItem {
+                            title: "Enviar al fondo";
+                            activated => { root.context-action("back"); }
+                        }
+                        MenuItem {
+                            title: "Eliminar";
+                            activated => { root.context-action("delete"); }
+                        }
+                    }
+                    TouchArea {
+                        mouse-cursor: root.picking || root.selecting-text || root.tool != "select" ? MouseCursor.crosshair : MouseCursor.default;
+                        pointer-event(event) => {
+                            if !root.editing && (event.kind == PointerEventKind.down || event.kind == PointerEventKind.up) {
+                                keys.focus();
+                            }
+                            root.pointer(
+                                event.kind == PointerEventKind.down ? "down" : event.kind == PointerEventKind.up ? "up" : event.kind == PointerEventKind.move ? "move" : "cancel",
+                                event.button == PointerEventButton.left ? "left" : event.button == PointerEventButton.right ? "right" : event.button == PointerEventButton.middle ? "middle" : "none",
+                                self.mouse-x,
+                                self.mouse-y,
+                                event.modifiers.shift,
+                                event.modifiers.control);
+                            if event.kind == PointerEventKind.down && event.button == PointerEventButton.right && root.has-selection {
+                                menu-area.show({ x: self.mouse-x, y: self.mouse-y });
+                            }
+                        }
+                        double-clicked => {
+                            root.pointer("double", "left", self.mouse-x, self.mouse-y, false, false);
+                        }
+                        scroll-event(event) => {
+                            root.scrolled(event.delta-x, event.delta-y, self.mouse-x, self.mouse-y, event.modifiers.control);
+                            accept
+                        }
+                    }
+                }
+
+                Rectangle {
+                    visible: root.editing;
+                    x: root.edit-x;
+                    y: root.edit-y;
+                    width: root.edit-width;
+                    height: root.edit-height;
+                    editor := TextInput {
+                        x: root.edit-padding-x;
+                        y: root.edit-padding-y;
+                        width: max(parent.width - 2 * root.edit-padding-x, 4px);
+                        height: max(parent.height - 2 * root.edit-padding-y, 4px);
+                        font-size: root.edit-font-size;
+                        font-weight: 700;
+                        color: transparent;
+                        selection-foreground-color: transparent;
+                        selection-background-color: transparent;
+                        single-line: false;
+                        wrap: no-wrap;
+                        edited => { root.text-changed(self.text); }
+                        changed cursor-position-byte-offset => { root.caret(self.cursor-position-byte-offset, self.anchor-position-byte-offset); }
+                        changed anchor-position-byte-offset => { root.caret(self.cursor-position-byte-offset, self.anchor-position-byte-offset); }
+                        key-pressed(event) => {
+                            if event.text == Key.Escape {
+                                root.text-finished();
+                                return accept;
+                            }
+                            if event.modifiers.control && (event.text == "z" || event.text == "Z") {
+                                if root.text-history(event.modifiers.shift) {
+                                    return accept;
+                                }
+                                return reject;
+                            }
+                            if event.modifiers.control && (event.text == "y" || event.text == "Y") {
+                                root.text-history(true);
+                                return accept;
+                            }
+                            reject
+                        }
+                    }
+                }
+
+                options-box := Rectangle {
+                    property <length> full-width: full-row.preferred-width + 28px;
+                    property <bool> compact: self.full-width > parent.width - 24px;
+                    property <length> wanted: self.compact ? short-row.preferred-width + 28px : self.full-width;
+                    property <length> room: zoom-box.width + 12px + 10px;
+                    property <bool> stacked: self.wanted > parent.width - 12px - self.room;
+                    visible: !root.media && root.options.length > 0;
+                    width: min(parent.width - 24px, self.wanted);
+                    height: 44px;
+                    x: self.stacked || self.wanted <= parent.width - 2 * self.room ? (parent.width - self.width) / 2 : 12px + (parent.width - self.room - 12px - self.width) / 2;
+                    y: parent.height - self.height - 14px;
+                    border-radius: 22px;
+                    background: Theme.tooltip;
+                    border-width: 1px;
+                    border-color: Theme.border;
+                    drop-shadow-blur: 12px;
+                    drop-shadow-color: #00000066;
+                    clip: true;
+                    full-row := OptionsRow {
+                        x: 14px;
+                        width: parent.width - 28px;
+                        visible: !options-box.compact;
+                        title: root.options-title;
+                        options: root.options;
+                        swatches: root.swatches;
+                        eyedropper: root.eyedropper-icon;
+                        color-picked(key, value) => { root.option-color(key, value); }
+                        pick-from-image(key) => { root.pick-color(key); }
+                        choice(key, index) => { root.option-choice(key, index); }
+                        check(key, value) => { root.option-check(key, value); }
+                        button(key) => { root.option-button(key); }
+                    }
+                    short-row := OptionsRow {
+                        x: 14px;
+                        width: parent.width - 28px;
+                        visible: options-box.compact;
+                        compact: true;
+                        options: root.options;
+                        swatches: root.swatches;
+                        eyedropper: root.eyedropper-icon;
+                        color-picked(key, value) => { root.option-color(key, value); }
+                        pick-from-image(key) => { root.pick-color(key); }
+                        choice(key, index) => { root.option-choice(key, index); }
+                        check(key, value) => { root.option-check(key, value); }
+                        button(key) => { root.option-button(key); }
+                    }
+                }
+
+                zoom-box := Rectangle {
+                    visible: !root.media;
+                    x: parent.width - self.width - 12px;
+                    y: options-box.visible && options-box.stacked ? options-box.y - self.height - 8px : parent.height - self.height - 18px;
+                    width: zoom-row.preferred-width + 8px;
+                    height: 32px;
+                    border-radius: 16px;
+                    background: Theme.tooltip;
+                    border-width: 1px;
+                    border-color: Theme.border;
+                    zoom-row := HorizontalLayout {
+                        x: 4px;
+                        spacing: 0px;
+                        Rectangle {
+                            width: 28px;
+                            border-radius: 14px;
+                            background: out-touch.has-hover ? #ffffff14 : transparent;
+                            Text {
+                                text: "−";
+                                font-size: 16px;
+                                color: Theme.text;
+                            }
+                            out-touch := TouchArea {
+                                clicked => { root.zoom("out"); }
+                            }
+                        }
+                        Rectangle {
+                            width: max(48px, zoom-text.preferred-width + 10px);
+                            border-radius: 6px;
+                            background: actual-touch.has-hover ? #ffffff14 : transparent;
+                            zoom-text := Text {
+                                text: root.zoom-label;
+                                font-size: 11px;
+                                color: Theme.text;
+                            }
+                            actual-touch := TouchArea {
+                                clicked => { root.zoom("actual"); }
+                            }
+                        }
+                        Rectangle {
+                            width: 28px;
+                            border-radius: 14px;
+                            background: in-touch.has-hover ? #ffffff14 : transparent;
+                            Text {
+                                text: "+";
+                                font-size: 16px;
+                                color: Theme.text;
+                            }
+                            in-touch := TouchArea {
+                                clicked => { root.zoom("in"); }
+                            }
+                        }
+                        Rectangle {
+                            width: 9px;
+                            Rectangle {
+                                x: 4px;
+                                width: 1px;
+                                height: 16px;
+                                background: Theme.border;
+                            }
+                        }
+                        Rectangle {
+                            width: 30px;
+                            border-radius: 14px;
+                            background: fit-touch.has-hover ? #ffffff14 : transparent;
+                            Path {
+                                width: 16px;
+                                height: 16px;
+                                viewbox-width: 24;
+                                viewbox-height: 24;
+                                commands: root.fit-icon;
+                                stroke: Theme.text;
+                                stroke-width: 1.8px;
+                                fill: transparent;
+                            }
+                            fit-touch := TouchArea {
+                                clicked => { root.zoom("fit"); }
+                            }
+                        }
+                    }
+                }
+
+                if root.selecting-text: Rectangle {
+                    x: (parent.width - self.width) / 2;
+                    y: 14px;
+                    width: selecting-label.preferred-width + 24px;
+                    height: 30px;
+                    border-radius: 15px;
+                    background: Theme.tooltip;
+                    border-width: 1px;
+                    border-color: Theme.accent;
+                    selecting-label := Text {
+                        text: "Arrastra sobre el texto que quieres extraer · Esc cancela";
+                        font-size: 12px;
+                        color: Theme.text;
+                    }
+                }
+
+                if root.picking: Rectangle {
+                    x: (parent.width - self.width) / 2;
+                    y: 14px;
+                    width: picking-text.preferred-width + 24px;
+                    height: 30px;
+                    border-radius: 15px;
+                    background: Theme.tooltip;
+                    border-width: 1px;
+                    border-color: Theme.accent;
+                    picking-text := Text {
+                        text: "Haz clic en la imagen para tomar su color · Esc cancela";
+                        font-size: 12px;
+                        color: Theme.text;
+                    }
+                }
+            }
+        }
+
+        if root.hint-title != "": Tooltip {
+            x: max(6px, min(root.hint-x - 6px, root.width - self.width - 6px));
+            y: root.top-height + 4px;
+            title: root.hint-title;
+            body: root.hint-body;
+        }
+    }
+}
+
+export component TextWindow inherits Window {
+    title: "Texto reconocido";
+    preferred-width: 540px;
+    preferred-height: 380px;
+    background: Theme.window;
+    in-out property <string> text;
+    callback copy-range(int, int);
+    callback dismiss();
+    init => {
+        Palette.color-scheme = ColorScheme.dark;
+    }
+    VerticalLayout {
+        padding: 14px;
+        spacing: 12px;
+        Rectangle {
+            background: Theme.panel;
+            border-width: 1px;
+            border-color: Theme.border;
+            border-radius: 6px;
+            scroll := ScrollView {
+                x: 1px;
+                y: 1px;
+                width: parent.width - 2px;
+                height: parent.height - 2px;
+                content-width: self.visible-width;
+                content-height: max(self.visible-height, body.preferred-height + 20px);
+                body := TextInput {
+                    x: 10px;
+                    y: 10px;
+                    width: scroll.visible-width - 20px;
+                    height: max(self.preferred-height, scroll.visible-height - 20px);
+                    text <=> root.text;
+                    single-line: false;
+                    wrap: word-wrap;
+                    font-size: 13px;
+                    color: Theme.text;
+                    selection-background-color: #ff3d7f80;
+                }
+            }
+        }
+        HorizontalLayout {
+            alignment: end;
+            spacing: 8px;
+            Button {
+                text: "Cerrar";
+                clicked => { root.dismiss(); }
+            }
+            Button {
+                text: "Copiar";
+                primary: true;
+                clicked => {
+                    root.copy-range(body.anchor-position-byte-offset, body.cursor-position-byte-offset);
+                }
+            }
+        }
+    }
+}
