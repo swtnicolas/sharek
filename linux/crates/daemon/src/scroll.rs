@@ -1,7 +1,7 @@
 use crate::app::Event;
 use crate::chrome::Chrome;
 use crate::screenshot::{self, Shot, Target};
-use crate::stitch::{Outcome, Stitcher};
+use crate::stitch::{self, Outcome, Stitcher};
 use crate::windows::Rect;
 use sharek_common::image::RgbImage;
 use smithay_client_toolkit::reexports::calloop::channel::Sender;
@@ -129,7 +129,7 @@ fn settled(dbus: &zbus::blocking::Connection, target: Target, control: &Control)
     while started.elapsed() < SETTLE_LIMIT && !control.cancelled() {
         std::thread::sleep(SETTLE_POLL);
         let shot = screenshot::capture(dbus, target, false)?;
-        if shot.image.data == last.image.data {
+        if stitch::settled(&last.image, &shot.image) {
             return Ok(Some(shot));
         }
         last = shot;
@@ -142,6 +142,7 @@ fn run(region: Rect, scroller: Option<&Scroller>, dbus: &zbus::blocking::Connect
     let Some(first) = settled(dbus, target, control)? else { return Ok(None) };
     let scale = first.scale;
     let mut stitcher = Stitcher::new((16.0 * scale).round() as usize);
+    stitcher.point_at(scroller.is_some().then_some(first.image.height as usize / 2));
     stitcher.add(first.image);
     let mut status = if scroller.is_some() { Status::Automatic } else { Status::Manual };
     let mut show = |next: Status, only_from: Option<Status>| {
@@ -165,6 +166,7 @@ fn run(region: Rect, scroller: Option<&Scroller>, dbus: &zbus::blocking::Connect
         let automatic = scroller.filter(|_| !control.manual.load(Ordering::Relaxed) && misses <= MAXIMUM_MISSES);
         let Some(scroller) = automatic else {
             show(Status::Manual, Some(Status::Automatic));
+            stitcher.point_at(None);
             std::thread::sleep(MANUAL_INTERVAL);
             let shot = screenshot::capture(dbus, target, false)?;
             match stitcher.add(shot.image) {

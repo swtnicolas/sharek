@@ -97,6 +97,7 @@ final class ScrollingCapture {
 
         let stitcher = ScrollStitcher(ignoredTrailingColumns: Int(16 * selection.scale))
         guard let first = try await settled(capture) else { return nil }
+        stitcher.pointer = automatic ? first.height / 2 : nil
         _ = stitcher.add(first)
 
         let global = selection.globalRect
@@ -117,6 +118,7 @@ final class ScrollingCapture {
             if automatic, !manualRequested, !global.contains(NSEvent.mouseLocation) { manualRequested = true }
             if !automatic || manualRequested || misses > maximumMisses {
                 if status == .automatic { show(.manual) }
+                stitcher.pointer = nil
                 try await Task.sleep(for: .milliseconds(80))
                 let shot = try await capture()
                 if cancelled { return nil }
@@ -166,14 +168,11 @@ final class ScrollingCapture {
     private func settled(_ capture: () async throws -> CGImage) async throws -> CGImage? {
         let started = Date()
         var last = try await capture()
-        var lastData = last.dataProvider?.data as Data?
         while Date().timeIntervalSince(started) < 1.5, !cancelled {
             try await Task.sleep(for: .milliseconds(60))
             let shot = try await capture()
-            let data = shot.dataProvider?.data as Data?
-            if data != nil, data == lastData { return shot }
+            if ScrollStitcher.settled(last, shot) { return shot }
             last = shot
-            lastData = data
         }
         return cancelled ? nil : last
     }

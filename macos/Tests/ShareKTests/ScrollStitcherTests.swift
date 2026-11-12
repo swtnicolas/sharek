@@ -73,3 +73,65 @@ private func page(offset: Int, viewport: Int = 200, header: Int = 0, footer: Int
     blinking[50] = [UInt32](repeating: 0xFF07_0707, count: width)
     #expect(stitcher.add(image(blinking)) == .unchanged)
 }
+
+private let animatedPixel: UInt32 = 0xFF07_0707
+
+private func paint(_ rows: inout [[UInt32]], _ indices: some Sequence<Int>, columns: Range<Int>) {
+    for index in indices {
+        for column in columns { rows[index][column] = animatedPixel }
+    }
+}
+
+private func hover(_ rows: inout [[UInt32]], _ indices: Range<Int>) {
+    for index in indices {
+        for column in 0..<(width - scrollbar) { rows[index][column] ^= 0x0010_1010 }
+    }
+}
+
+@Test func animatedTilesScatteredOverTheOverlapStillMatch() {
+    let stitcher = ScrollStitcher(ignoredTrailingColumns: scrollbar)
+    _ = stitcher.add(image(page(offset: 0)))
+    var animated = page(offset: 60)
+    paint(&animated, (0..<200).filter { $0 % 40 < 8 }, columns: 16..<24)
+    #expect(stitcher.add(image(animated)) == .appended(rows: 60))
+}
+
+@Test func aHoverBandAcrossTheOverlapStillMatches() {
+    let stitcher = ScrollStitcher(ignoredTrailingColumns: scrollbar)
+    _ = stitcher.add(image(page(offset: 0)))
+    var hovered = page(offset: 50)
+    hover(&hovered, 70..<110)
+    #expect(stitcher.add(image(hovered)) == .appended(rows: 50))
+}
+
+@Test func anAnimatedTileWithoutScrollingIsUnchanged() {
+    let stitcher = ScrollStitcher(ignoredTrailingColumns: scrollbar)
+    _ = stitcher.add(image(page(offset: 0)))
+    var animated = page(offset: 0)
+    paint(&animated, 40..<70, columns: 16..<24)
+    #expect(stitcher.add(image(animated)) == .unchanged)
+}
+
+@Test func aHoverBandUnderThePointerLargerThanAThirdStillMatches() {
+    var hovered = page(offset: 50)
+    hover(&hovered, 60..<130)
+    let unknown = ScrollStitcher(ignoredTrailingColumns: scrollbar)
+    _ = unknown.add(image(page(offset: 0)))
+    #expect(unknown.add(image(hovered)) == .noMatch)
+    let pointed = ScrollStitcher(ignoredTrailingColumns: scrollbar)
+    pointed.pointer = 100
+    _ = pointed.add(image(page(offset: 0)))
+    #expect(pointed.add(image(hovered)) == .appended(rows: 50))
+}
+
+@Test func aRepeatedBlockThatOutvotesTheRealMoveIsSkipped() {
+    let repeated = (0..<50).map { contentRow(9000 + $0) }
+    var previous = (0..<200).map(contentRow)
+    previous.replaceSubrange(60..<110, with: repeated)
+    previous.replaceSubrange(140..<190, with: repeated)
+    var current = Array(previous[100...]) + (0..<100).map { contentRow(5000 + $0) }
+    paint(&current, Array(0..<40) + Array(90..<200), columns: 0..<8)
+    let stitcher = ScrollStitcher(ignoredTrailingColumns: scrollbar)
+    _ = stitcher.add(image(previous))
+    #expect(stitcher.add(image(current)) == .appended(rows: 100))
+}

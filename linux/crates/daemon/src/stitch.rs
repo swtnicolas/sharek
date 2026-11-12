@@ -6,6 +6,11 @@ const WINDOW: usize = 16;
 const AGREEMENT: usize = 90;
 const SAME_FRAME: usize = 97;
 const MOVING_COLUMN: usize = 2;
+const TILE: usize = 8;
+const DISTURBED_SHARE: usize = 3;
+const TOLERATED_BANDS: usize = 2;
+const CANDIDATES: usize = 3;
+const KEPT_SHARE: usize = 4;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Outcome {
@@ -19,6 +24,19 @@ pub enum Outcome {
 struct Rows {
     hashes: Vec<u64>,
     distinctive: Vec<bool>,
+    tiles: Vec<u64>,
+    varied: Vec<bool>,
+    per_row: usize,
+}
+
+impl Rows {
+    fn tiles(&self, row: usize) -> &[u64] {
+        &self.tiles[row * self.per_row..(row + 1) * self.per_row]
+    }
+
+    fn varied(&self, row: usize) -> &[bool] {
+        &self.varied[row * self.per_row..(row + 1) * self.per_row]
+    }
 }
 
 pub struct Stitcher {
@@ -30,6 +48,7 @@ pub struct Stitcher {
     pieces: Vec<RgbImage>,
     footer: Option<usize>,
     height: usize,
+    pointer: Option<usize>,
 }
 
 fn crop_rows(image: &RgbImage, top: usize, count: usize) -> RgbImage {
@@ -37,21 +56,32 @@ fn crop_rows(image: &RgbImage, top: usize, count: usize) -> RgbImage {
     RgbImage { width: image.width, height: count as u32, data: image.data[top * row..(top + count) * row].to_vec().into() }
 }
 
+fn hash(pixels: &[[u8; 3]]) -> u64 {
+    pixels.iter().fold(0xCBF2_9CE4_8422_2325u64, |hash, pixel| {
+        let value = u64::from(pixel[0]) | (u64::from(pixel[1]) << 8) | (u64::from(pixel[2]) << 16);
+        (hash ^ value).wrapping_mul(0x0000_0100_0000_01B3)
+    })
+}
+
+fn uniform(pixels: &[[u8; 3]]) -> bool {
+    pixels.iter().all(|pixel| pixel == &pixels[0])
+}
+
 fn rows(image: &RgbImage, columns: Range<usize>) -> Rows {
     let stride = image.width as usize * 3;
-    let mut hashes = Vec::with_capacity(image.height as usize);
-    let mut distinctive = Vec::with_capacity(image.height as usize);
+    let height = image.height as usize;
+    let per_row = columns.len().div_ceil(TILE);
+    let mut rows = Rows { hashes: Vec::with_capacity(height), distinctive: Vec::with_capacity(height), tiles: Vec::with_capacity(height * per_row), varied: Vec::with_capacity(height * per_row), per_row };
     for line in image.data.chunks_exact(stride) {
-        let pixels = &line[columns.start * 3..columns.end * 3];
-        let mut hash = 0xCBF2_9CE4_8422_2325u64;
-        for pixel in pixels.as_chunks::<3>().0 {
-            let value = u64::from(pixel[0]) | (u64::from(pixel[1]) << 8) | (u64::from(pixel[2]) << 16);
-            hash = (hash ^ value).wrapping_mul(0x0000_0100_0000_01B3);
+        let pixels = line[columns.start * 3..columns.end * 3].as_chunks::<3>().0;
+        rows.hashes.push(hash(pixels));
+        rows.distinctive.push(!uniform(pixels));
+        for tile in pixels.chunks(TILE) {
+            rows.tiles.push(hash(tile));
+            rows.varied.push(!uniform(tile));
         }
-        hashes.push(hash);
-        distinctive.push(pixels.as_chunks::<3>().0.iter().any(|pixel| pixel != &pixels[..3]));
     }
-    Rows { hashes, distinctive }
+    rows
 }
 
 fn moving_columns(before: &RgbImage, after: &RgbImage, ignored_trailing: usize) -> Option<Range<usize>> {
@@ -86,7 +116,7 @@ fn windows(rows: &Rows) -> Vec<Option<u64>> {
         .collect()
 }
 
-fn offset(previous: &Rows, current: &Rows) -> Option<usize> {
+fn offset(previous: &Rows, current: &Rows, pointer: Option<usize>) -> Option<usize> {
     let mut positions: HashMap<u64, Vec<usize>> = HashMap::new();
     for (index, hash) in windows(previous).into_iter().enumerate() {
         if let Some(hash) = hash {
@@ -105,24 +135,54 @@ fn offset(previous: &Rows, current: &Rows) -> Option<usize> {
             *votes.entry(found - index).or_default() += 1;
         }
     }
-    let (best, count) = votes.into_iter().max_by(|a, b| a.1.cmp(&b.1).then(b.0.cmp(&a.0)))?;
-    (count >= (candidates / 5).max(4) && overlap_agrees(previous, current, best)).then_some(best)
+    let mut ranked: Vec<(usize, usize)> = votes.into_iter().filter(|&(_, count)| count >= (candidates / 5).max(4)).collect();
+    ranked.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+    ranked.into_iter().take(CANDIDATES).map(|(moved, _)| moved).find(|&moved| overlap_agrees(previous, current, moved, pointer))
 }
 
-fn overlap_agrees(previous: &Rows, current: &Rows, moved: usize) -> bool {
+fn overlap_agrees(previous: &Rows, current: &Rows, moved: usize, pointer: Option<usize>) -> bool {
     let height = current.hashes.len().min(previous.hashes.len());
-    let (mut compared, mut agreed) = (0, 0);
-    for row in 0..height.saturating_sub(moved) {
-        let fixed = |at: usize| current.hashes[at] == previous.hashes[at];
-        if !current.distinctive[row] || fixed(row) || fixed(row + moved) {
+    let counts: Vec<(usize, usize)> = (0..height.saturating_sub(moved))
+        .map(|row| {
+            let (now, before) = (current.tiles(row), previous.tiles(row + moved));
+            let (now_varied, before_varied) = (current.varied(row), previous.varied(row + moved));
+            let (still_here, still_there) = (previous.tiles(row), current.tiles(row + moved));
+            (0..now.len())
+                .filter(|&tile| (now_varied[tile] || before_varied[tile]) && now[tile] != still_here[tile] && still_there[tile] != before[tile])
+                .fold((0, 0), |(compared, agreed), tile| (compared + 1, agreed + usize::from(now[tile] == before[tile])))
+        })
+        .collect();
+    let disturbed = disturbed_bands(&counts, pointer.map(|row| [Some(row), row.checked_sub(moved)]));
+    let total = counts.iter().map(|count| count.0).sum::<usize>();
+    let (compared, agreed) = counts.iter().enumerate().filter(|(row, _)| !disturbed.iter().any(|band| band.contains(row))).fold((0, 0), |sum, (_, count)| (sum.0 + count.0, sum.1 + count.1));
+    compared >= 4 * WINDOW && compared * KEPT_SHARE >= total && agreed * 100 >= compared * AGREEMENT
+}
+
+fn disturbed_bands(counts: &[(usize, usize)], pointer: Option<[Option<usize>; 2]>) -> Vec<Range<usize>> {
+    let mut bands: Vec<(Range<usize>, usize)> = Vec::new();
+    for (row, &(compared, agreed)) in counts.iter().enumerate() {
+        if agreed * 2 >= compared {
             continue;
         }
-        compared += 1;
-        if current.hashes[row] == previous.hashes[row + moved] {
-            agreed += 1;
+        match bands.last_mut() {
+            Some((band, missed)) if row - band.end <= WINDOW => {
+                band.end = row + 1;
+                *missed += compared - agreed;
+            }
+            _ => bands.push((row..row + 1, compared - agreed)),
         }
     }
-    compared >= 4 && agreed * 100 >= compared * AGREEMENT
+    let hovered = |band: &Range<usize>| band.len() * 2 <= counts.len() && pointer.into_iter().flatten().flatten().any(|row| band.start <= row + WINDOW && row < band.end + WINDOW);
+    let (mut disturbed, mut others): (Vec<_>, Vec<_>) = bands.into_iter().partition(|(band, _)| hovered(band));
+    others.sort_by_key(|(_, missed)| std::cmp::Reverse(*missed));
+    let mut tolerated = 0;
+    for band in others.into_iter().take(TOLERATED_BANDS) {
+        if (tolerated + band.0.len()) * DISTURBED_SHARE <= counts.len() {
+            tolerated += band.0.len();
+            disturbed.push(band);
+        }
+    }
+    disturbed.into_iter().map(|(band, _)| band).collect()
 }
 
 fn below_content(previous: &Rows, current: &Rows, moved: usize) -> usize {
@@ -134,13 +194,28 @@ fn below_content(previous: &Rows, current: &Rows, moved: usize) -> usize {
 }
 
 fn same_frame(previous: &Rows, current: &Rows) -> bool {
-    let same = previous.hashes.iter().zip(&current.hashes).filter(|(a, b)| a == b).count();
-    same * 100 >= current.hashes.len() * SAME_FRAME
+    let (mut compared, mut same) = (0, 0);
+    for (index, (before, now)) in previous.tiles.iter().zip(&current.tiles).enumerate() {
+        if previous.varied[index] || current.varied[index] {
+            compared += 1;
+            same += usize::from(before == now);
+        }
+    }
+    same * 100 >= compared * SAME_FRAME
+}
+
+pub fn settled(before: &RgbImage, after: &RgbImage) -> bool {
+    let whole = 0..before.width as usize;
+    before.width == after.width && before.height == after.height && same_frame(&rows(before, whole.clone()), &rows(after, whole))
 }
 
 impl Stitcher {
     pub fn new(ignored_trailing: usize) -> Stitcher {
-        Stitcher { ignored_trailing, columns: None, first: None, last: None, previous: None, pieces: Vec::new(), footer: None, height: 0 }
+        Stitcher { ignored_trailing, columns: None, first: None, last: None, previous: None, pieces: Vec::new(), footer: None, height: 0, pointer: None }
+    }
+
+    pub fn point_at(&mut self, row: Option<usize>) {
+        self.pointer = row;
     }
 
     pub fn height(&self) -> usize {
@@ -176,8 +251,8 @@ impl Stitcher {
             return Outcome::Unchanged;
         }
         let frame_height = image.height as usize;
-        let Some(moved) = offset(previous, &current) else {
-            return if offset(&current, previous).is_some() { Outcome::Reversed } else { Outcome::NoMatch };
+        let Some(moved) = offset(previous, &current, self.pointer) else {
+            return if offset(&current, previous, self.pointer).is_some() { Outcome::Reversed } else { Outcome::NoMatch };
         };
 
         let footer = self.footer.unwrap_or_else(|| below_content(previous, &current, moved).max((frame_height * 6 / 100).max(8)));
@@ -385,6 +460,84 @@ mod tests {
         stitcher.add(sidebar(page.frame(0, 0)));
         assert_eq!(stitcher.add(sidebar(page.frame(70, 0))), Outcome::Appended(70));
         assert_eq!(stitcher.add(sidebar(page.frame(140, 0))), Outcome::Appended(70));
+    }
+
+    fn paint(image: &mut RgbImage, rows: impl Iterator<Item = usize>, columns: Range<usize>, value: u8) {
+        let row = WIDTH as usize * 3;
+        for index in rows {
+            image.data[index * row + columns.start * 3..index * row + columns.end * 3].fill(value);
+        }
+    }
+
+    #[test]
+    fn animated_tiles_scattered_over_the_overlap_still_match() {
+        let page = Page { header: 0, footer: 0, viewport: 200 };
+        let mut stitcher = Stitcher::new(SCROLLBAR);
+        stitcher.add(page.frame(0, 0));
+        let mut animated = page.frame(60, 0);
+        paint(&mut animated, (0..200).filter(|row| row % 40 < 8), 16..24, 7);
+        assert_eq!(stitcher.add(animated), Outcome::Appended(60));
+    }
+
+    #[test]
+    fn a_hover_band_across_the_overlap_still_matches() {
+        let page = Page { header: 0, footer: 0, viewport: 200 };
+        let mut stitcher = Stitcher::new(SCROLLBAR);
+        stitcher.add(page.frame(0, 0));
+        let mut hovered = page.frame(50, 0);
+        let row = WIDTH as usize * 3;
+        for line in hovered.data.chunks_exact_mut(row).take(110).skip(70) {
+            line[..(WIDTH as usize - SCROLLBAR) * 3].iter_mut().for_each(|byte| *byte ^= 0x10);
+        }
+        assert_eq!(stitcher.add(hovered), Outcome::Appended(50));
+    }
+
+    #[test]
+    fn an_animated_tile_without_scrolling_is_unchanged() {
+        let page = Page { header: 0, footer: 0, viewport: 200 };
+        let mut stitcher = Stitcher::new(SCROLLBAR);
+        stitcher.add(page.frame(0, 0));
+        let mut animated = page.frame(0, 0);
+        paint(&mut animated, 40..70, 16..24, 7);
+        assert_eq!(stitcher.add(animated), Outcome::Unchanged);
+    }
+
+    #[test]
+    fn a_hover_band_under_the_pointer_larger_than_a_third_still_matches() {
+        let page = Page { header: 0, footer: 0, viewport: 200 };
+        let hovered = || {
+            let mut frame = page.frame(50, 0);
+            let row = WIDTH as usize * 3;
+            for line in frame.data.chunks_exact_mut(row).take(130).skip(60) {
+                line[..(WIDTH as usize - SCROLLBAR) * 3].iter_mut().for_each(|byte| *byte ^= 0x10);
+            }
+            frame
+        };
+        let mut unknown = Stitcher::new(SCROLLBAR);
+        unknown.add(page.frame(0, 0));
+        assert_eq!(unknown.add(hovered()), Outcome::NoMatch);
+        let mut pointed = Stitcher::new(SCROLLBAR);
+        pointed.point_at(Some(100));
+        pointed.add(page.frame(0, 0));
+        assert_eq!(pointed.add(hovered()), Outcome::Appended(50));
+    }
+
+    #[test]
+    fn a_repeated_block_that_outvotes_the_real_move_is_skipped() {
+        let repeated: Vec<Vec<u8>> = (0..50).map(|row| content_row(9000 + row)).collect();
+        let mut previous: Vec<Vec<u8>> = (0..200).map(content_row).collect();
+        previous.splice(60..110, repeated.clone());
+        previous.splice(140..190, repeated);
+        let mut current: Vec<Vec<u8>> = previous[100..].iter().cloned().chain((0..100).map(|row| content_row(5000 + row))).collect();
+        for line in current.iter_mut().take(40) {
+            line[..24].fill(7);
+        }
+        for line in current.iter_mut().skip(90) {
+            line[..24].fill(7);
+        }
+        let mut stitcher = Stitcher::new(SCROLLBAR);
+        stitcher.add(frame_of(&previous));
+        assert_eq!(stitcher.add(frame_of(&current)), Outcome::Appended(100));
     }
 
     #[test]

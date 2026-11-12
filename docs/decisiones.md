@@ -140,7 +140,7 @@ MP4 a 30 fps y GIF a 15 fps de una región. Un borde rojo punteado rodea la regi
 
 ## Captura con desplazamiento
 
-El panel dice "Desplazamiento" y desplaza solo la zona elegida: empieza con un paso pequeño, mide cuánto se movió el contenido y ajusta los siguientes pasos para avanzar un 40 % de la zona cada vez. Antes de cada captura espera a que la pantalla se quede quieta. Una unión se acepta solo si todo el solape coincide; las columnas que no se mueven, como una barra lateral fija, no cuentan, y lo fijo de abajo nunca entra en una unión. Termina sola al llegar al final.
+El panel dice "Desplazamiento" y desplaza solo la zona elegida: empieza con un paso pequeño, mide cuánto se movió el contenido y ajusta los siguientes pasos para avanzar un 40 % de la zona cada vez. Antes de cada captura espera a que la pantalla se quede quieta; una pantalla quieta con algo animado cuenta como quieta. Una unión se acepta cuando coincide el 90 % del solape, comparado en bloques de 8 píxeles, así que un GIF o un emote animado no la impiden. El resaltado que una página pinta bajo el cursor tampoco: en modo automático las franjas alteradas que tocan la fila del cursor no cuentan, y se toleran hasta dos franjas alteradas más si juntas no pasan de un tercio del solape. Las columnas que no se mueven, como una barra lateral fija, no cuentan, y lo fijo de abajo nunca entra en una unión. Termina sola al llegar al final.
 
 Al empezar, el cursor se lleva una sola vez al centro de la zona; desde ahí queda libre y el desplazamiento ocurre donde esté. Sacar el cursor de la zona es tomar el control: la captura pasa al modo manual y no envía más desplazamientos.
 

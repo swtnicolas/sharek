@@ -3708,7 +3708,7 @@ dependencies = [
 
 [[package]]
 name = "sharek"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "futures-lite",
  "ksni",
@@ -3727,7 +3727,7 @@ dependencies = [
 
 [[package]]
 name = "sharek-common"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "jpeg-encoder",
  "libc",
@@ -3743,7 +3743,7 @@ dependencies = [
 
 [[package]]
 name = "sharek-editor"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "gif",
  "libc",
@@ -3762,14 +3762,14 @@ dependencies = [
 
 [[package]]
 name = "sharek-gif"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "gif",
 ]
 
 [[package]]
 name = "sharek-ocr"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "ort",
  "serde_json",
